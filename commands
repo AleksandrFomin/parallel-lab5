@@ -1,0 +1,22 @@
+
+../OracleDeveloperStudio12.5-linux-x86-bin/developerstudio12.5/bin/cc -cc -O3 lab1.c
+
+../OracleDeveloperStudio12.5-linux-x86-bin/developerstudio12.5/bin/f90 -o lab1-seq lab1.o -lm
+
+--------------------------------------------------------------------------------------------------------------------
+export OMP_NUM_THREADS=5
+
+../OracleDeveloperStudio12.5-linux-x86-bin/developerstudio12.5/bin/cc -cc -O3 -xautopar -xloopinfo lab1.c
+
+../OracleDeveloperStudio12.5-linux-x86-bin/developerstudio12.5/bin/f90 -xautopar -o lab1-seq lab1.o -lm
+
+
+
+
+
+
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$LIBRARY_PATH
+export LD_LIBRARY_PATH=/home/aleksandr/intel/compilers_and_libraries_2020.2.254/linux/compiler/lib/intel64:$LD_LIBRARY_PATH
+
+/home/aleksandr/intel/bin/icc -parallel -par-num-threads=2 -o lab1-icc-par-2 lab1.c -lm
