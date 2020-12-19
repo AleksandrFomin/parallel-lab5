@@ -4,22 +4,40 @@
 #include <sys/time.h>
 #include <math.h>
 #include <unistd.h>
+#include <pthread.h>
 
-#if defined(_OPENMP)
-#include "omp.h"
-#else
+#define NTHREADS 4
+
+#define pthread_parallel(arr1, arr2, size, func) {                                         \
+			int i, retval;                                                                 \
+			pthread_t threads[NTHREADS];                                                   \
+			struct thread_arg *args = malloc(sizeof(struct thread_arg) * NTHREADS);        \
+                                                                                           \
+			for (i = 0; i < NTHREADS; i++) {                                               \
+				args[i].arr = arr1;                                                        \
+				args[i].arr2 = arr2;                                                       \
+				args[i].size = size;                                                       \
+				args[i].thread_id = i;                                                     \
+				pthread_create(&threads[i], NULL, func, args + i);                         \
+			}                                                                              \
+                                                                                           \
+			for (i = 0; i < NTHREADS; i++)                                                 \
+				pthread_join(threads[i], &retval);                                         \
+		}
+
+struct thread_arg {
+	double *arr;
+	double *arr2;
+	int	   thread_id;
+	int    size;
+};
+
 struct timeval timeval;
 double omp_get_wtime()
 {
 	gettimeofday(&timeval, NULL);
 	return (double)timeval.tv_sec + (double)timeval.tv_usec / 1000000;
 }
-
-void omp_set_nested(int val)
-{
-	val = 1;
-}
-#endif
 
 void fill_array(double *arr, int size, double left, double right, unsigned int *seedp)
 {
@@ -44,26 +62,34 @@ void print_array(double *arr, int size)
 	printf("]\n");
 }
 
-void map_m1(double *arr, int size)
+void *map_m1_thread_func(void *arg)
 {
-	int i;
+	struct thread_arg *arg_str = arg;
 
-	#if defined(_OPENMP)
-	#pragma omp parallel for default(none) private(i) shared(arr, size)
-	#endif
-	for (i = 0; i < size; i++) {
+	int thread_id = arg_str->thread_id;
+	int size = arg_str->size;
+	double *arr = arg_str->arr;
+
+	for (i = thread_id; i < size; i += NTHREADS) {
 		arr[i] = tanh(arr[i]) - 1;
 	}
 }
 
-void map_m2(double *arr, int size, double *arr_copy)
+void map_m1(double *arr, int size)
 {
-	int i;
+	pthread_parallel(arr, NULL, size, map_m1_thread_func);
+}
 
-	#if defined(_OPENMP)
-	#pragma omp parallel for default(none) private(i) shared(arr, arr_copy, size)
-	#endif
-	for (i = 0; i < size; i++) {
+void *map_m2_thread_func(void *arg)
+{
+	struct thread_arg *arg_str = arg;
+	
+	int thread_id = arg_str->thread_id;
+	int size = arg_str->size;
+	double *arr = arg_str->arr;
+	double *arr_copy = arg_str->arr2;
+
+	for (i = thread_id; i < size; i += NTHREADS) {
 		double prev = 0;
 		if (i > 0)
 			prev = arr_copy[i - 1];
@@ -71,27 +97,47 @@ void map_m2(double *arr, int size, double *arr_copy)
 	}
 }
 
+void map_m2(double *arr, int size, double *arr_copy)
+{
+	pthread_parallel(arr, arr_copy, size, map_m2_thread_func);
+}
+
+void *copy_arr_thread_func(void *arg)
+{
+	struct thread_arg *arg_str = arg;
+	
+	int thread_id = arg_str->thread_id;
+	int size = arg_str->size;
+	double *src = arg_str->arr;
+	double *dst = arg_str->arr2;
+
+	for (i = thread_id; i < size; i += NTHREADS) {
+		dst[i] = src[i];
+	}
+}
+
 void copy_arr(double *src, int len, double *dst)
 {
-	int i;
+	pthread_parallel(src, dst, len, copy_arr_thread_func);
+}
 
-	#if defined(_OPENMP)
-	#pragma omp parallel for default(none) private(i) shared(src, dst, len)
-	#endif
-	for (i = 0; i < len; i++)
-		dst[i] = src[i];
+void *apply_merge_thread_func(void *arg)
+{
+	struct thread_arg *arg_str = arg;
+	
+	int thread_id = arg_str->thread_id;
+	int size = arg_str->size;
+	double *m1 = arg_str->arr;
+	double *m2 = arg_str->arr2;
+
+	for (i = thread_id; i < size; i += NTHREADS) {
+		m2[i] = fabs(m1[i] - m2[i]);
+	}
 }
 
 void apply_merge_func(double *m1, double *m2, int m2_len)
 {
-	int i;
-
-	#if defined(_OPENMP)
-	#pragma omp parallel for default(none) private(i) shared(m1, m2, m2_len)
-	#endif
-	for (i = 0; i < m2_len; i++) {
-		m2[i] = fabs(m1[i] - m2[i]);
-	}
+	pthread_parallel(m1, m2, m2_len, copy_arr_thread_func);
 }
 
 void heapify(double *array, int n)
@@ -297,8 +343,6 @@ void do_timer(int *status)
 int main(int argc, char* argv[])
 {
 	int status = 0;
-
-	omp_set_nested(1);
 
 	#if defined(_OPENMP)
 	#pragma omp parallel sections shared(status)
