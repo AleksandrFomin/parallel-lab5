@@ -72,7 +72,7 @@ struct timeval timeval;
 double omp_get_wtime()
 {
 	gettimeofday(&timeval, NULL);
-	return (double)timeval.tv_sec + (double)timeval.tv_usec / 1000000;
+	return (double)timeval.tv_sec + (double)timeval.tv_usec / 1000000.0;
 }
 
 void *fill_array_thread_func(void *arg)
@@ -115,7 +115,7 @@ void fill_array(double *arr, int size, double left, double right, unsigned int *
 	struct thread_arg *args = malloc(sizeof(struct thread_arg) * NTHREADS);
 	double T1, T2;
 
-	int chunk_size = 5;
+	int chunk_size = size / 4;
 
 	T1 = omp_get_wtime();
 
@@ -135,7 +135,7 @@ void fill_array(double *arr, int size, double left, double right, unsigned int *
 
 	T2 = omp_get_wtime();
 
-	stages_time[GENERATE] = get_interval_us(T1, T2);
+	stages_time[GENERATE] += get_interval_us(T1, T2);
 }
 
 void print_array(double *arr, int size)
@@ -231,7 +231,7 @@ void copy_arr(double *src, int len, double *dst)
 	pthread_parallel(src, dst, len, copy_arr_thread_func);
 
 	T2 = omp_get_wtime();
-	stages_time[COPY] = get_interval_us(T1, T2);
+	stages_time[COPY] += get_interval_us(T1, T2);
 }
 
 void *apply_merge_thread_func(void *arg)
@@ -259,7 +259,7 @@ void apply_merge_func(double *m1, double *m2, int m2_len)
 	pthread_parallel(m1, m2, m2_len, apply_merge_thread_func);
 
 	T2 = omp_get_wtime();
-	stages_time[MERGE] = get_interval_us(T1, T2);
+	stages_time[MERGE] += get_interval_us(T1, T2);
 }
 
 void heapify(double *array, int n)
@@ -406,7 +406,7 @@ double reduce(double *arr, int len)
 	}
 
 	T2 = omp_get_wtime();
-	stages_time[REDUCE] = get_interval_us(T1, T2);
+	stages_time[REDUCE] += get_interval_us(T1, T2);
 
 	return x;
 }
@@ -425,7 +425,7 @@ void *sort_thread_func(void *arg)
 
 void *do_main(void *arg)
 {
-	int i, N2;
+	int i, j, N2;
 	void *retval;
 	double T1, T2, T1_sort, T2_sort;
 	long delta_ms;
@@ -433,7 +433,7 @@ void *do_main(void *arg)
 	int A = 540;
 	unsigned int seed1, seed2;
 	// double X;
-	int iter = 1;
+	int iter = 50;
 	pthread_t threads[2];
 	struct thread_arg *args = malloc(sizeof(struct thread_arg) * 2);
 
@@ -478,13 +478,13 @@ void *do_main(void *arg)
 		args[1].size = (N2 + 1) / 2;
 		pthread_create(&threads[1], NULL, sort_thread_func, args + 1);
 
-		for (i = 0; i < 2; i++)
-			pthread_join(threads[i], &retval);
+		for (j = 0; j < 2; j++)
+			pthread_join(threads[j], &retval);
 
 		mergeArrays(MERGED, M2, M2 + (N2 / 2), N2 / 2, (N2 + 1) / 2);
 
 		T2_sort = omp_get_wtime();
-		stages_time[SORT] = get_interval_us(T1_sort, T2_sort);
+		stages_time[SORT] += get_interval_us(T1_sort, T2_sort);
 
 		// print_array(MERGED, N / 2);
 
@@ -517,7 +517,7 @@ void *do_timer(void *status)
 		pthread_mutex_lock(&status_lock);
 		val = *((int *) status);
 		pthread_mutex_unlock(&status_lock);
-		printf("Status = %d%%\n", val);
+		// printf("Status = %d%%\n", val);
 		sleep(1);
 	}
 
