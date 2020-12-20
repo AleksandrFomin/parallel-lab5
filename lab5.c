@@ -26,6 +26,33 @@
 				pthread_join(threads[i], &retval);											\
 		}
 
+enum lab_stages {
+	GENERATE = 0,
+	MAP,
+	COPY,
+	MERGE,
+	SORT,
+	REDUCE,
+	STAGES_AMOUNT,
+};
+
+long stages_time[STAGES_AMOUNT] = { 0 };
+
+void print_stages_time()
+{
+	int i;
+	for (i = 0; i < STAGES_AMOUNT; i++) {
+		printf(" %ld", stages_time[i]);
+	}
+
+	printf("\n");
+}
+
+long get_interval_us(double T1, double T2)
+{
+	return (T2 - T1) * 1000;
+}
+
 struct thread_arg {
 	double *arr;
 	double *arr2;
@@ -86,8 +113,11 @@ void fill_array(double *arr, int size, double left, double right, unsigned int *
 	void *retval;
 	pthread_t threads[NTHREADS];
 	struct thread_arg *args = malloc(sizeof(struct thread_arg) * NTHREADS);
+	double T1, T2;
 
 	int chunk_size = 5;
+
+	T1 = omp_get_wtime();
 
 	for (i = 0; i < NTHREADS; i++) {
 		args[i].arr = arr;
@@ -102,6 +132,10 @@ void fill_array(double *arr, int size, double left, double right, unsigned int *
 
 	for (i = 0; i < NTHREADS; i++)
 		pthread_join(threads[i], &retval);
+
+	T2 = omp_get_wtime();
+
+	stages_time[GENERATE] = get_interval_us(T1, T2);
 }
 
 void print_array(double *arr, int size)
@@ -132,7 +166,13 @@ void *map_m1_thread_func(void *arg)
 
 void map_m1(double *arr, int size)
 {
+	double T1, T2;
+	T1 = omp_get_wtime();
+
 	pthread_parallel(arr, NULL, size, map_m1_thread_func);
+
+	T2 = omp_get_wtime();
+	stages_time[MAP] += get_interval_us(T1, T2);
 }
 
 void *map_m2_thread_func(void *arg)
@@ -157,7 +197,13 @@ void *map_m2_thread_func(void *arg)
 
 void map_m2(double *arr, int size, double *arr_copy)
 {
+	double T1, T2;
+	T1 = omp_get_wtime();
+
 	pthread_parallel(arr, arr_copy, size, map_m2_thread_func);
+
+	T2 = omp_get_wtime();
+	stages_time[MAP] += get_interval_us(T1, T2);
 }
 
 void *copy_arr_thread_func(void *arg)
@@ -179,7 +225,13 @@ void *copy_arr_thread_func(void *arg)
 
 void copy_arr(double *src, int len, double *dst)
 {
+	double T1, T2;
+	T1 = omp_get_wtime();
+
 	pthread_parallel(src, dst, len, copy_arr_thread_func);
+
+	T2 = omp_get_wtime();
+	stages_time[COPY] = get_interval_us(T1, T2);
 }
 
 void *apply_merge_thread_func(void *arg)
@@ -201,7 +253,13 @@ void *apply_merge_thread_func(void *arg)
 
 void apply_merge_func(double *m1, double *m2, int m2_len)
 {
+	double T1, T2;
+	T1 = omp_get_wtime();
+
 	pthread_parallel(m1, m2, m2_len, apply_merge_thread_func);
+
+	T2 = omp_get_wtime();
+	stages_time[MERGE] = get_interval_us(T1, T2);
 }
 
 void heapify(double *array, int n)
@@ -262,6 +320,7 @@ void heapsort(double *array, int n)
 void mergeArrays(double *dst, double *arr1, double *arr2, int len1, int len2)
 {
 	int i, j, k;
+
 	i = j = k = 0;
 	for (i = 0; i < len1 && j < len2;) {
 		if (arr1[i] < arr2[j]) {
@@ -327,6 +386,9 @@ double reduce(double *arr, int len)
 	double x = 0;
 	pthread_t threads[NTHREADS];
 	struct thread_arg *args = malloc(sizeof(struct thread_arg) * NTHREADS);
+	double T1, T2;
+
+	T1 = omp_get_wtime();
 
 	double min_val = min_not_null(arr, len);
 
@@ -342,6 +404,9 @@ double reduce(double *arr, int len)
 		pthread_join(threads[i], &retval);
 		x += args[i].x;
 	}
+
+	T2 = omp_get_wtime();
+	stages_time[REDUCE] = get_interval_us(T1, T2);
 
 	return x;
 }
@@ -362,7 +427,7 @@ void *do_main(void *arg)
 {
 	int i, N2;
 	void *retval;
-	double T1, T2;
+	double T1, T2, T1_sort, T2_sort;
 	long delta_ms;
 	double *M1, *M2, *M2_copy, *MERGED;
 	int A = 540;
@@ -403,6 +468,8 @@ void *do_main(void *arg)
 
 		N2 = N / 2;
 
+		T1_sort = omp_get_wtime();
+
 		args[0].arr = M2;
 		args[0].size = N2 / 2;
 		pthread_create(&threads[0], NULL, sort_thread_func, args);
@@ -416,6 +483,9 @@ void *do_main(void *arg)
 
 		mergeArrays(MERGED, M2, M2 + (N2 / 2), N2 / 2, (N2 + 1) / 2);
 
+		T2_sort = omp_get_wtime();
+		stages_time[SORT] = get_interval_us(T1_sort, T2_sort);
+
 		// print_array(MERGED, N / 2);
 
 		reduce(MERGED, N / 2);
@@ -423,8 +493,9 @@ void *do_main(void *arg)
 	}
 	T2 = omp_get_wtime(); /* запомнить текущее время T2 */
 
-	delta_ms = (T2 - T1) * 1000;
-	printf("%d %ld\n", N, delta_ms); /* T2 - T1 */
+	delta_ms = get_interval_us(T1, T2);
+	printf("%d %ld", N, delta_ms); /* T2 - T1 */
+	print_stages_time();
 
 	free(M1);
 	free(M2);
